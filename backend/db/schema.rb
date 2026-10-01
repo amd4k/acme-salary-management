@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_30_220000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_01_193305) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -36,6 +36,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_220000) do
     t.index ["employee_number"], name: "index_employees_on_employee_number", unique: true
   end
 
+  create_table "salary_records", force: :cascade do |t|
+    t.bigint "employee_id", null: false
+    t.decimal "amount", precision: 13, scale: 2, null: false
+    t.string "currency", null: false
+    t.date "effective_from", null: false
+    t.string "reason", null: false
+    t.bigint "created_by_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_by_id"], name: "index_salary_records_on_created_by_id"
+    t.index ["employee_id"], name: "index_salary_records_on_employee_id"
+  end
+
   create_table "users", force: :cascade do |t|
     t.string "first_name", null: false
     t.string "last_name", null: false
@@ -49,5 +62,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_220000) do
   end
 
   add_foreign_key "employees", "countries"
+  add_foreign_key "salary_records", "employees"
+  add_foreign_key "salary_records", "users", column: "created_by_id"
   add_foreign_key "users", "employees"
 end
