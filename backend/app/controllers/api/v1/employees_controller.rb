@@ -9,14 +9,39 @@ class Api::V1::EmployeesController < ApplicationController
       return render json: { error: "Invalid pagination parameters" }, status: :bad_request
     end
 
-    employees = Employee
-      .includes(:country)
+    employees = Employee.includes(:country)
+
+    if params[:search].present?
+      search = "%#{params[:search]}%"
+
+      employees = employees.where(
+        "employee_number ILIKE :search
+         OR first_name ILIKE :search
+         OR last_name ILIKE :search
+         OR email ILIKE :search",
+        search: search
+      )
+    end
+
+    if params[:country_id].present?
+      employees = employees.where(country_id: params[:country_id])
+    end
+
+    if params[:department].present?
+      employees = employees.where(department: params[:department])
+    end
+
+    if params[:employment_status].present?
+      employees = employees.where(employment_status: params[:employment_status])
+    end
+
+    total = employees.count
+    total_pages = (total.to_f / per_page).ceil
+
+    employees = employees
       .order(:employee_number)
       .limit(per_page)
       .offset((page - 1) * per_page)
-
-    total = Employee.count
-    total_pages = (total.to_f / per_page).ceil
 
     render json: {
       employees: employees.as_json(
