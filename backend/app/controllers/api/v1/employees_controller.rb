@@ -68,4 +68,57 @@ class Api::V1::EmployeesController < ApplicationController
       }
     }
   end
+  
+  def show
+    employee = Employee.includes(:country, :salary_records).find(params[:id])
+
+    salary_history = employee.salary_records.order(effective_from: :desc)
+
+    current_salary = employee.salary_records
+      .where("effective_from <= ?", Date.current)
+      .order(effective_from: :desc)
+      .first
+
+    render json: {
+      employee: employee.as_json(
+        only: [
+          :id,
+          :employee_number,
+          :first_name,
+          :last_name,
+          :email,
+          :department,
+          :employment_status
+        ],
+        include: {
+          country: {
+            only: [:id, :name, :code]
+          }
+        }
+      ),
+      current_salary: current_salary&.as_json(
+        only: [
+          :id,
+          :amount,
+          :currency,
+          :effective_from,
+          :reason,
+          :created_by_id
+        ]
+      ),
+      salary_history: salary_history.as_json(
+        only: [
+          :id,
+          :amount,
+          :currency,
+          :effective_from,
+          :reason,
+          :created_by_id
+        ]
+      )
+    }
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: "Employee not found" }, status: :not_found
+  end
+      
 end

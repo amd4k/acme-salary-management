@@ -233,6 +233,160 @@ class Api::V1::EmployeesControllerTest < ActionDispatch::IntegrationTest
     assert_equal 1, body["pagination"]["total_pages"]
   end
 
+  ##################
+
+  test "requires authentication for employee details" do
+    get "/api/v1/employees/#{@employee_1.id}"
+
+    assert_response :unauthorized
+  end
+
+  test "returns employee details for an authenticated user" do
+    get "/api/v1/employees/#{@employee_1.id}",
+        headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :ok
+
+    response_body = JSON.parse(response.body)
+
+    assert_equal @employee_1.id, response_body["employee"]["id"]
+    assert_equal @employee_1.employee_number, response_body["employee"]["employee_number"]
+    assert_equal @employee_1.first_name, response_body["employee"]["first_name"]
+    assert_equal @employee_1.last_name, response_body["employee"]["last_name"]
+  end
+
+  test "includes country in employee details" do
+    get "/api/v1/employees/#{@employee_1.id}",
+        headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :ok
+
+    response_body = JSON.parse(response.body)
+
+    assert_equal @country_us.id, response_body["employee"]["country"]["id"]
+    assert_equal "United States", response_body["employee"]["country"]["name"]
+    assert_equal "US", response_body["employee"]["country"]["code"]
+  end
+
+  test "returns nil current salary when employee has no salary records" do
+    get "/api/v1/employees/#{@employee_1.id}",
+        headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :ok
+
+    response_body = JSON.parse(response.body)
+
+    assert_nil response_body["current_salary"]
+    assert_equal [], response_body["salary_history"]
+  end
+
+  test "returns salary history ordered by effective date descending" do
+    SalaryRecord.create!(
+      employee: @employee_1,
+      amount: 50_000,
+      currency: "USD",
+      effective_from: Date.new(2024, 1, 1),
+      reason: "Initial salary",
+      created_by: @user
+    )
+
+    SalaryRecord.create!(
+      employee: @employee_1,
+      amount: 60_000,
+      currency: "USD",
+      effective_from: Date.new(2025, 1, 1),
+      reason: "Annual increase",
+      created_by: @user
+    )
+
+    get "/api/v1/employees/#{@employee_1.id}",
+        headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :ok
+
+    response_body = JSON.parse(response.body)
+    salary_history = response_body["salary_history"]
+
+    assert_equal 2, salary_history.length
+    assert_equal "60000.0", salary_history[0]["amount"]
+    assert_equal "2025-01-01", salary_history[0]["effective_from"]
+    assert_equal "50000.0", salary_history[1]["amount"]
+    assert_equal "2024-01-01", salary_history[1]["effective_from"]
+  end
+
+  test "returns the latest salary effective today or earlier as current salary" do
+    SalaryRecord.create!(
+      employee: @employee_1,
+      amount: 50_000,
+      currency: "USD",
+      effective_from: Date.new(2024, 1, 1),
+      reason: "Initial salary",
+      created_by: @user
+    )
+
+    today = Date.current
+
+    SalaryRecord.create!(
+      employee: @employee_1,
+      amount: 60_000,
+      currency: "USD",
+      effective_from: today,
+      reason: "Current salary",
+      created_by: @user
+    )
+
+    SalaryRecord.create!(
+      employee: @employee_1,
+      amount: 70_000,
+      currency: "USD",
+      effective_from: Date.current + 1.day,
+      reason: "Future salary",
+      created_by: @user
+    )
+
+    get "/api/v1/employees/#{@employee_1.id}",
+        headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :ok
+
+    response_body = JSON.parse(response.body)
+
+    assert_equal "60000.0", response_body["current_salary"]["amount"]
+    assert_equal today.to_s, response_body["current_salary"]["effective_from"]
+  end
+
+  test "does not use a future salary as the current salary" do
+    SalaryRecord.create!(
+      employee: @employee_1,
+      amount: 70_000,
+      currency: "USD",
+      effective_from: Date.current + 30.days,
+      reason: "Future salary",
+      created_by: @user
+    )
+
+    get "/api/v1/employees/#{@employee_1.id}",
+        headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :ok
+
+    response_body = JSON.parse(response.body)
+
+    assert_nil response_body["current_salary"]
+  end
+
+  test "returns not found for an unknown employee" do
+    get "/api/v1/employees/999999",
+        headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :not_found
+
+    response_body = JSON.parse(response.body)
+
+    assert_equal "Employee not found", response_body["error"]
+  end
+
+  ##################
 
   private
 
@@ -249,7 +403,7 @@ class Api::V1::EmployeesControllerTest < ActionDispatch::IntegrationTest
   end
 
   def create_employees
-    Employee.create!(
+    @employee_1 = Employee.create!(
       employee_number: "EMP-1",
       first_name: "Employee",
       last_name: "1",
@@ -259,7 +413,7 @@ class Api::V1::EmployeesControllerTest < ActionDispatch::IntegrationTest
       employment_status: "active"
     )
 
-    Employee.create!(
+    @employee_2 = Employee.create!(
       employee_number: "EMP-2",
       first_name: "Employee",
       last_name: "2",
@@ -269,7 +423,7 @@ class Api::V1::EmployeesControllerTest < ActionDispatch::IntegrationTest
       employment_status: "active"
     )
 
-    Employee.create!(
+    @employee_3 = Employee.create!(
       employee_number: "EMP-3",
       first_name: "Employee",
       last_name: "3",
