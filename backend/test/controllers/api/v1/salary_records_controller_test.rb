@@ -215,4 +215,31 @@ class Api::V1::SalaryRecordsControllerTest < ActionDispatch::IntegrationTest
     assert_equal @other_employee.id, salary_record.employee_id
     assert_equal @user.id, salary_record.created_by_id
   end
+
+  test "requires authentication to update a salary record" do
+    salary_record = SalaryRecord.create!(
+      employee: @other_employee,
+      amount: 60_000,
+      currency: "USD",
+      effective_from: Date.current,
+      reason: "Initial salary",
+      created_by: @user
+    )
+
+    patch api_v1_employee_salary_record_path(@other_employee, salary_record),
+      params: {
+        salary_record: {
+          amount: 70_000,
+          currency: "USD",
+          effective_from: Date.current,
+          reason: "Salary adjustment"
+        }
+      }
+
+    assert_response :unauthorized
+
+    salary_record.reload
+
+    assert_equal 60_000, salary_record.amount.to_f
+  end
 end

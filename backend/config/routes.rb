@@ -12,7 +12,7 @@ Rails.application.routes.draw do
     namespace :v1 do
       post "login", to: "sessions#create"
       resources :employees, only: [:index, :show] do
-        resources :salary_records, only: [:create]
+        resources :salary_records, only: [:create, :update]
       end
     end
   end
