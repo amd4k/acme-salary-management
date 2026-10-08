@@ -233,8 +233,6 @@ class Api::V1::EmployeesControllerTest < ActionDispatch::IntegrationTest
     assert_equal 1, body["pagination"]["total_pages"]
   end
 
-  ##################
-
   test "requires authentication for employee details" do
     get "/api/v1/employees/#{@employee_1.id}"
 
@@ -385,8 +383,6 @@ class Api::V1::EmployeesControllerTest < ActionDispatch::IntegrationTest
 
     assert_equal "Employee not found", response_body["error"]
   end
-
-  ##################
 
   private
 

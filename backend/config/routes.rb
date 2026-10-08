@@ -11,7 +11,9 @@ Rails.application.routes.draw do
   namespace :api do 
     namespace :v1 do
       post "login", to: "sessions#create"
-      resources :employees, only: [:index, :show]
+      resources :employees, only: [:index, :show] do
+        resources :salary_records, only: [:create]
+      end
     end
   end
 end
