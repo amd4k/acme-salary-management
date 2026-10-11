@@ -34,6 +34,27 @@ function App() {
     localStorage.setItem('acme-theme', theme)
   }, [theme])
 
+  const [search, setSearch] = useState('')
+  const [departmentFilter, setDepartmentFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+
+  const filteredEmployees = employees.filter((employee) => {
+    const query = search.trim().toLowerCase()
+
+    const matchesSearch =
+      employee.name.toLowerCase().includes(query) ||
+      employee.id.toLowerCase().includes(query) ||
+      employee.email.toLowerCase().includes(query)
+
+    const matchesDepartment =
+      !departmentFilter || employee.department === departmentFilter
+
+    const matchesStatus =
+      !statusFilter || employee.status === statusFilter
+
+    return matchesSearch && matchesDepartment && matchesStatus
+  })
+
   return (
     <div className={`app-shell ${theme === 'dark' ? 'theme-dark' : ''}`}>
       <aside className="sidebar">
@@ -169,20 +190,30 @@ function App() {
                   type="search"
                   placeholder="Search by name, ID or email..."
                   aria-label="Search employees"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
                 />
               </label>
-              <select aria-label="Filter by department" defaultValue="">
+              <select
+                aria-label="Filter by department"
+                value={departmentFilter}
+                onChange={(event) => setDepartmentFilter(event.target.value)}
+              >
                 <option value="">All departments</option>
-                <option>Engineering</option>
-                <option>Product</option>
-                <option>Design</option>
-                <option>Marketing</option>
-                <option>Finance</option>
+                <option value="Engineering">Engineering</option>
+                <option value="Product">Product</option>
+                <option value="Design">Design</option>
+                <option value="Marketing">Marketing</option>
+                <option value="Finance">Finance</option>
               </select>
-              <select aria-label="Filter by status" defaultValue="">
+              <select
+                aria-label="Filter by status"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+              >
                 <option value="">All statuses</option>
-                <option>Active</option>
-                <option>On leave</option>
+                <option value="Active">Active</option>
+                <option value="On leave">On leave</option>
               </select>
             </div>
 
@@ -199,7 +230,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {employees.map((employee, index) => (
+                  {filteredEmployees.map((employee, index) => (
                     <tr key={employee.id}>
                       <td>
                         <div className="employee-cell">
@@ -224,6 +255,13 @@ function App() {
                       <td><button className="row-menu" aria-label={`More options for ${employee.name}`}>···</button></td>
                     </tr>
                   ))}
+                  {filteredEmployees.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="empty-state">
+                        No employees match your search or filters.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

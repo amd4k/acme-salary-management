@@ -998,3 +998,13 @@ h1 {
     display: none;
   }
 }
+
+.empty-state {
+  height: 100px;
+  text-align: center;
+  color: #858b9d !important;
+}
+
+.theme-dark .empty-state {
+  color: #a4aec3 !important;
+}
