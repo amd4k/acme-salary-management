@@ -1,10 +1,12 @@
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 import {
+  fetchDashboardStatistics,
   fetchEmployees,
   login,
   type AuthUser,
+  type DashboardStatistics,
   type Employee,
 } from './api'
 
@@ -32,6 +34,9 @@ function App() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [isLoadingEmployees, setIsLoadingEmployees] = useState(false)
   const [employeeError, setEmployeeError] = useState('')
+  const [statistics, setStatistics] = useState<DashboardStatistics | null>(null)
+  const [isLoadingStatistics, setIsLoadingStatistics] = useState(false)
+  const [statisticsError, setStatisticsError] = useState('')
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('acme-theme')
@@ -90,6 +95,43 @@ function App() {
     }
   }, [authToken])
 
+  useEffect(() => {
+    if (!authToken) return
+
+    let cancelled = false
+
+    async function loadStatistics() {
+      setIsLoadingStatistics(true)
+      setStatisticsError('')
+
+      try {
+        const result = await fetchDashboardStatistics(authToken!)
+
+        if (!cancelled) {
+          setStatistics(result)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setStatisticsError(
+            error instanceof Error
+              ? error.message
+              : 'Failed to load dashboard statistics',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingStatistics(false)
+        }
+      }
+    }
+
+    void loadStatistics()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authToken])
+
   const departments = Array.from(
     new Set(employees.map((employee) => employee.department)),
   ).sort()
@@ -116,19 +158,14 @@ function App() {
     return matchesSearch && matchesDepartment && matchesStatus
   })
 
-  const totalEmployees = employees.length
+  const totalEmployees = statistics?.total_employees ?? 0
+  const activeEmployees = statistics?.active_employees ?? 0
+  const totalDepartments = statistics?.total_departments ?? 0
+  const totalCountries = statistics?.total_countries ?? 0
 
-  const activeEmployees = employees.filter(
-    (employee) => employee.employment_status.toLowerCase() === 'active',
-  ).length
-
-  const totalDepartments = departments.length
-
-  const totalCountries = new Set(
-    employees.map((employee) => employee.country.name),
-  ).size
-
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+  async function handleLogin(
+    event: React.SubmitEvent<HTMLFormElement>,
+  ) {
     event.preventDefault()
     setLoginError('')
     setIsLoggingIn(true)
@@ -151,6 +188,8 @@ function App() {
     setAuthToken(null)
     setAuthUser(null)
     setEmployees([])
+    setStatistics(null)
+    setStatisticsError('')
     setEmployeeError('')
     setSearch('')
     setDepartmentFilter('')
@@ -302,18 +341,64 @@ function App() {
             </div>
           </section>
 
+
           {employeeError && (
             <div role="alert" className="empty-state">
               <p>Could not load employees: {employeeError}</p>
               <button
                 type="button"
                 className="secondary-button"
-                onClick={() => {
+                disabled={isLoadingEmployees}
+                onClick={async () => {
                   setEmployeeError('')
-                  setAuthToken((current) => current)
+                  setIsLoadingEmployees(true)
+
+                  try {
+                    const result = await fetchEmployees(authToken)
+                    setEmployees(result.employees)
+                  } catch (error) {
+                    setEmployeeError(
+                      error instanceof Error
+                        ? error.message
+                        : 'Failed to load employees',
+                    )
+                  } finally {
+                    setIsLoadingEmployees(false)
+                  }
                 }}
               >
-                Dismiss error
+                {isLoadingEmployees ? 'Retrying…' : 'Retry employees'}
+              </button>
+            </div>
+          )}
+
+
+          {statisticsError && (
+            <div role="alert" className="empty-state">
+              <p>Could not load dashboard statistics: {statisticsError}</p>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={isLoadingStatistics}
+                onClick={async () => {
+                  setStatisticsError('')
+                  setIsLoadingStatistics(true)
+
+                  try {
+                    const result = await fetchDashboardStatistics(authToken)
+                    setStatistics(result)
+                  } catch (error) {
+                    setStatisticsError(
+                      error instanceof Error
+                        ? error.message
+                        : 'Failed to load dashboard statistics',
+                    )
+                  } finally {
+                    setIsLoadingStatistics(false)
+                  }
+                }}
+              >
+                {isLoadingStatistics ? 'Retrying…' : 'Retry statistics'}
               </button>
             </div>
           )}
@@ -325,9 +410,9 @@ function App() {
                 <span className="stat-icon icon-indigo">♙</span>
               </div>
               <div className="stat-value">
-                {isLoadingEmployees ? '…' : totalEmployees}
+                {isLoadingStatistics ? '…' : totalEmployees}
               </div>
-              <div className="stat-foot">Returned by the employee API</div>
+              <div className="stat-foot">Across the organization</div>
             </article>
 
             <article className="stat-card">
@@ -336,31 +421,41 @@ function App() {
                 <span className="stat-icon icon-green">✓</span>
               </div>
               <div className="stat-value">
-                {isLoadingEmployees ? '…' : activeEmployees}
+                {isLoadingStatistics ? '…' : activeEmployees}
               </div>
               <div className="stat-foot">
-                {totalEmployees === 0
-                  ? 'No employee data yet'
-                  : `${((activeEmployees / totalEmployees) * 100).toFixed(1)}% of returned employees`}
+                {isLoadingStatistics
+                  ? 'Loading statistics…'
+                  : totalEmployees === 0
+                    ? 'No employee data yet'
+                    : `${((activeEmployees / totalEmployees) * 100).toFixed(1)}% of all employees`}
               </div>
             </article>
 
             <article className="stat-card">
               <div className="stat-top">
-                <span>Departments</span>
+                <span>Active departments</span>
                 <span className="stat-icon icon-orange">▦</span>
               </div>
-              <div className="stat-value">{totalDepartments}</div>
-              <div className="stat-foot">Distinct departments</div>
+              <div className="stat-value">
+                {isLoadingStatistics ? '…' : totalDepartments}
+              </div>
+              <div className="stat-foot">
+                Distinct departments with active employees
+              </div>
             </article>
 
             <article className="stat-card">
               <div className="stat-top">
-                <span>Countries</span>
+                <span>Countries with active employees</span>
                 <span className="stat-icon icon-blue">◎</span>
               </div>
-              <div className="stat-value">{totalCountries}</div>
-              <div className="stat-foot">Countries represented</div>
+              <div className="stat-value">
+                {isLoadingStatistics ? '…' : totalCountries}
+              </div>
+              <div className="stat-foot">
+                Distinct countries with active employees
+              </div>
             </article>
           </section>
 
@@ -513,7 +608,7 @@ function App() {
             <footer className="table-footer">
               <span>
                 Showing <strong>{filteredEmployees.length}</strong> of{' '}
-                <strong>{totalEmployees}</strong> employees returned by the API
+                <strong>{employees.length}</strong> loaded employees
               </span>
             </footer>
           </section>

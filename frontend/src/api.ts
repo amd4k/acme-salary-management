@@ -79,3 +79,35 @@ export async function fetchEmployees(
 
     return data as EmployeesResponse
 }
+
+export interface DashboardStatistics {
+    total_employees: number
+    active_employees: number
+    total_departments: number
+    total_countries: number
+}
+
+interface DashboardStatisticsResponse {
+    statistics: DashboardStatistics
+}
+
+export async function fetchDashboardStatistics(
+    token: string,
+): Promise<DashboardStatistics> {
+    const response = await fetch(
+        `${API_BASE_URL}/api/v1/dashboard/statistics`,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        },
+    )
+
+    const data = await response.json()
+
+    if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch dashboard statistics')
+    }
+
+    return (data as DashboardStatisticsResponse).statistics
+}
