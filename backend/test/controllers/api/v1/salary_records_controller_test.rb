@@ -242,4 +242,74 @@ class Api::V1::SalaryRecordsControllerTest < ActionDispatch::IntegrationTest
 
     assert_equal 60_000, salary_record.amount.to_f
   end
+
+  test "records the authenticated user who updates a salary record" do
+    salary_record = SalaryRecord.create!(
+      employee: @other_employee,
+      amount: 60_000,
+      currency: "USD",
+      effective_from: Date.current,
+      reason: "Initial salary",
+      created_by: @user
+    )
+
+    patch api_v1_employee_salary_record_path(@other_employee, salary_record),
+      params: {
+        salary_record: {
+          amount: 70_000,
+          currency: "USD",
+          effective_from: Date.current,
+          reason: "Annual salary adjustment"
+        }
+      },
+      headers: {
+        "Authorization" => "Bearer #{@token}"
+      }
+
+    assert_response :ok
+
+    salary_record.reload
+    assert_equal 70_000, salary_record.amount.to_f
+    assert_equal @user.id, salary_record.created_by_id
+    assert_equal @user.id, salary_record.updated_by_id
+
+    response_body = JSON.parse(response.body)
+    assert_equal @user.id, response_body.dig("salary_record", "updated_by_id")
+  end
+
+  test "prevents an HR user from updating their own salary" do
+    @user.update!(employee: @other_employee)
+
+    salary_record = SalaryRecord.create!(
+      employee: @other_employee,
+      amount: 60_000,
+      currency: "USD",
+      effective_from: Date.current,
+      reason: "Initial salary",
+      created_by: @user
+    )
+
+    patch api_v1_employee_salary_record_path(@other_employee, salary_record),
+      params: {
+        salary_record: {
+          amount: 80_000,
+          currency: "USD",
+          effective_from: Date.current,
+          reason: "Self salary increase"
+        }
+      },
+      headers: {
+        "Authorization" => "Bearer #{@token}"
+      }
+
+    assert_response :forbidden
+    assert_equal(
+      "You cannot change your own salary",
+      JSON.parse(response.body)["error"]
+    )
+
+    salary_record.reload
+    assert_equal 60_000, salary_record.amount.to_f
+    assert_nil salary_record.updated_by_id
+  end
 end

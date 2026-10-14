@@ -1,6 +1,7 @@
 class SalaryRecord < ApplicationRecord
   belongs_to :employee
   belongs_to :created_by, class_name: "User"
+  belongs_to :updated_by, class_name: "User", optional: true
 
   validates :amount, presence: true
   validates :currency, presence: true
