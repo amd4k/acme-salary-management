@@ -1,14 +1,12 @@
-import { useEffect, useState } from 'react'
-import './App.css'
 
-const employees = [
-  { id: 'ACM-1001', name: 'Olivia Rhye', email: 'olivia@acme.com', department: 'Engineering', country: 'United States', status: 'Active', salary: '$125,000' },
-  { id: 'ACM-1002', name: 'Phoenix Baker', email: 'phoenix@acme.com', department: 'Product', country: 'United Kingdom', status: 'Active', salary: '$98,000' },
-  { id: 'ACM-1003', name: 'Lana Steiner', email: 'lana@acme.com', department: 'Design', country: 'Germany', status: 'Active', salary: '$86,000' },
-  { id: 'ACM-1004', name: 'Demi Wilkinson', email: 'demi@acme.com', department: 'Marketing', country: 'India', status: 'On leave', salary: '$72,000' },
-  { id: 'ACM-1005', name: 'Candice Wu', email: 'candice@acme.com', department: 'Engineering', country: 'United States', status: 'Active', salary: '$118,000' },
-  { id: 'ACM-1006', name: 'Natali Craig', email: 'natali@acme.com', department: 'Finance', country: 'India', status: 'Active', salary: '$64,000' },
-]
+import { useEffect, useState, type FormEvent } from 'react'
+import './App.css'
+import {
+  fetchEmployees,
+  login,
+  type AuthUser,
+  type Employee,
+} from './api'
 
 const navigation = [
   { icon: '▦', label: 'Overview' },
@@ -17,7 +15,24 @@ const navigation = [
   { icon: '▥', label: 'Analytics' },
 ]
 
+function formatStatus(status: string) {
+  return status
+    .replace(/[_-]/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
 function App() {
+  const [authToken, setAuthToken] = useState<string | null>(null)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loginError, setLoginError] = useState('')
+  const [isLoggingIn, setIsLoggingIn] = useState(false)
+
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [isLoadingEmployees, setIsLoadingEmployees] = useState(false)
+  const [employeeError, setEmployeeError] = useState('')
+
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('acme-theme')
 
@@ -30,37 +45,165 @@ function App() {
       : 'light'
   })
 
-  useEffect(() => {
-    localStorage.setItem('acme-theme', theme)
-  }, [theme])
-
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
 
+  useEffect(() => {
+    localStorage.setItem('acme-theme', theme)
+  }, [theme])
+
+  useEffect(() => {
+    if (!authToken) return
+
+    let cancelled = false
+
+    async function loadEmployees() {
+      setIsLoadingEmployees(true)
+      setEmployeeError('')
+
+      try {
+        const result = await fetchEmployees(authToken!)
+
+        if (!cancelled) {
+          setEmployees(result.employees)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEmployeeError(
+            error instanceof Error
+              ? error.message
+              : 'Failed to load employees',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingEmployees(false)
+        }
+      }
+    }
+
+    void loadEmployees()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authToken])
+
+  const departments = Array.from(
+    new Set(employees.map((employee) => employee.department)),
+  ).sort()
+
+  const statuses = Array.from(
+    new Set(employees.map((employee) => employee.employment_status)),
+  ).sort()
+
   const filteredEmployees = employees.filter((employee) => {
     const query = search.trim().toLowerCase()
+    const fullName = `${employee.first_name} ${employee.last_name}`
 
     const matchesSearch =
-      employee.name.toLowerCase().includes(query) ||
-      employee.id.toLowerCase().includes(query) ||
+      fullName.toLowerCase().includes(query) ||
+      employee.employee_number.toLowerCase().includes(query) ||
       employee.email.toLowerCase().includes(query)
 
     const matchesDepartment =
       !departmentFilter || employee.department === departmentFilter
 
     const matchesStatus =
-      !statusFilter || employee.status === statusFilter
+      !statusFilter || employee.employment_status === statusFilter
 
     return matchesSearch && matchesDepartment && matchesStatus
   })
+
+  const totalEmployees = employees.length
+
+  const activeEmployees = employees.filter(
+    (employee) => employee.employment_status.toLowerCase() === 'active',
+  ).length
+
+  const totalDepartments = departments.length
+
+  const totalCountries = new Set(
+    employees.map((employee) => employee.country.name),
+  ).size
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setLoginError('')
+    setIsLoggingIn(true)
+
+    try {
+      const result = await login(email, password)
+      setAuthToken(result.token)
+      setAuthUser(result.user)
+      setPassword('')
+    } catch (error) {
+      setLoginError(
+        error instanceof Error ? error.message : 'Unable to log in',
+      )
+    } finally {
+      setIsLoggingIn(false)
+    }
+  }
+
+  function handleLogout() {
+    setAuthToken(null)
+    setAuthUser(null)
+    setEmployees([])
+    setEmployeeError('')
+    setSearch('')
+    setDepartmentFilter('')
+    setStatusFilter('')
+    setLoginError('')
+    setPassword('')
+  }
+
+  if (!authToken || !authUser) {
+    return (
+      <main className="login-page">
+        <form className="login-card" onSubmit={handleLogin}>
+          <h1>ACME Salary Management</h1>
+          <p>Sign in to your HR account</p>
+
+          <label htmlFor="email">Email address</label>
+          <input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="username"
+            required
+          />
+
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
+            required
+          />
+
+          {loginError && <p role="alert">{loginError}</p>}
+
+          <button type="submit" disabled={isLoggingIn}>
+            {isLoggingIn ? 'Signing in...' : 'Sign in'}
+          </button>
+        </form>
+      </main>
+    )
+  }
 
   return (
     <div className={`app-shell ${theme === 'dark' ? 'theme-dark' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">A</div>
-          <span>acme<span className="brand-light"> people</span></span>
+          <span>
+            acme<span className="brand-light"> people</span>
+          </span>
         </div>
 
         <div className="workspace-label">WORKSPACE</div>
@@ -75,7 +218,9 @@ function App() {
             >
               <span className="nav-icon">{item.icon}</span>
               {item.label}
-              {item.label === 'Employees' && <span className="nav-count">10k</span>}
+              {item.label === 'Employees' && (
+                <span className="nav-count">{totalEmployees}</span>
+              )}
             </a>
           ))}
         </nav>
@@ -86,13 +231,27 @@ function App() {
             <strong>Need a hand?</strong>
             <p>Contact your workspace administrator for help.</p>
           </div>
+
           <div className="profile">
-            <div className="avatar avatar-purple">HR</div>
-            <div className="profile-info">
-              <strong>HR Manager</strong>
-              <span>hr@acme.com</span>
+            <div className="avatar avatar-purple">
+              {authUser.first_name[0]}
+              {authUser.last_name[0]}
             </div>
-            <span className="profile-menu">···</span>
+            <div className="profile-info">
+              <strong>
+                {authUser.first_name} {authUser.last_name}
+              </strong>
+              <span>{authUser.email}</span>
+            </div>
+            <button
+              type="button"
+              className="profile-menu"
+              onClick={handleLogout}
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              ↪
+            </button>
           </div>
         </div>
       </aside>
@@ -100,26 +259,35 @@ function App() {
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumbs">
-            <span>Workspace</span><span>/</span><strong>Employees</strong>
+            <span>Workspace</span>
+            <span>/</span>
+            <strong>Employees</strong>
           </div>
+
           <div className="topbar-right">
-            <span className="environment-label">DEMO DATA</span>
+            <span className="environment-label">CONNECTED TO API</span>
 
             <button
               className="theme-toggle"
               type="button"
               aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
               title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-              onClick={() => setTheme((current) =>
-                current === 'light' ? 'dark' : 'light'
-              )}
+              onClick={() =>
+                setTheme((current) =>
+                  current === 'light' ? 'dark' : 'light',
+                )
+              }
             >
               {theme === 'light' ? '☾' : '☀'}
-              <span>{theme === 'light' ? 'Dark mode' : 'Light mode'}</span>
+              <span>
+                {theme === 'light' ? 'Dark mode' : 'Light mode'}
+              </span>
             </button>
 
-            <button className="icon-button" aria-label="Notifications">♧</button>
-            <div className="avatar avatar-blue">HR</div>
+            <div className="avatar avatar-blue">
+              {authUser.first_name[0]}
+              {authUser.last_name[0]}
+            </div>
           </div>
         </header>
 
@@ -132,10 +300,23 @@ function App() {
                 Manage your people, compensation and employee information.
               </p>
             </div>
-            <button className="primary-button" onClick={() => alert('Employee creation will be added in a later step.')}>
-              <span>＋</span> Add employee
-            </button>
           </section>
+
+          {employeeError && (
+            <div role="alert" className="empty-state">
+              <p>Could not load employees: {employeeError}</p>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setEmployeeError('')
+                  setAuthToken((current) => current)
+                }}
+              >
+                Dismiss error
+              </button>
+            </div>
+          )}
 
           <section className="stats-grid">
             <article className="stat-card">
@@ -143,32 +324,43 @@ function App() {
                 <span>Total employees</span>
                 <span className="stat-icon icon-indigo">♙</span>
               </div>
-              <div className="stat-value">10,000</div>
-              <div className="stat-foot">Across all countries</div>
+              <div className="stat-value">
+                {isLoadingEmployees ? '…' : totalEmployees}
+              </div>
+              <div className="stat-foot">Returned by the employee API</div>
             </article>
+
             <article className="stat-card">
               <div className="stat-top">
                 <span>Active employees</span>
                 <span className="stat-icon icon-green">✓</span>
               </div>
-              <div className="stat-value">9,642</div>
-              <div className="stat-foot"><span className="positive">96.4%</span> of total workforce</div>
+              <div className="stat-value">
+                {isLoadingEmployees ? '…' : activeEmployees}
+              </div>
+              <div className="stat-foot">
+                {totalEmployees === 0
+                  ? 'No employee data yet'
+                  : `${((activeEmployees / totalEmployees) * 100).toFixed(1)}% of returned employees`}
+              </div>
             </article>
+
             <article className="stat-card">
               <div className="stat-top">
                 <span>Departments</span>
                 <span className="stat-icon icon-orange">▦</span>
               </div>
-              <div className="stat-value">8</div>
-              <div className="stat-foot">Across the organization</div>
+              <div className="stat-value">{totalDepartments}</div>
+              <div className="stat-foot">Distinct departments</div>
             </article>
+
             <article className="stat-card">
               <div className="stat-top">
                 <span>Countries</span>
                 <span className="stat-icon icon-blue">◎</span>
               </div>
-              <div className="stat-value">12</div>
-              <div className="stat-foot">Global workforce</div>
+              <div className="stat-value">{totalCountries}</div>
+              <div className="stat-foot">Countries represented</div>
             </article>
           </section>
 
@@ -178,7 +370,11 @@ function App() {
                 <h2>All employees</h2>
                 <p>Search and manage your employee directory.</p>
               </div>
-              <button className="secondary-button" onClick={() => window.print()}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => window.print()}
+              >
                 ↓ Export
               </button>
             </div>
@@ -194,26 +390,31 @@ function App() {
                   onChange={(event) => setSearch(event.target.value)}
                 />
               </label>
+
               <select
                 aria-label="Filter by department"
                 value={departmentFilter}
                 onChange={(event) => setDepartmentFilter(event.target.value)}
               >
                 <option value="">All departments</option>
-                <option value="Engineering">Engineering</option>
-                <option value="Product">Product</option>
-                <option value="Design">Design</option>
-                <option value="Marketing">Marketing</option>
-                <option value="Finance">Finance</option>
+                {departments.map((department) => (
+                  <option key={department} value={department}>
+                    {department}
+                  </option>
+                ))}
               </select>
+
               <select
                 aria-label="Filter by status"
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value)}
               >
                 <option value="">All statuses</option>
-                <option value="Active">Active</option>
-                <option value="On leave">On leave</option>
+                {statuses.map((status) => (
+                  <option key={status} value={status}>
+                    {formatStatus(status)}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -229,54 +430,91 @@ function App() {
                     <th></th>
                   </tr>
                 </thead>
+
                 <tbody>
-                  {filteredEmployees.map((employee, index) => (
-                    <tr key={employee.id}>
-                      <td>
-                        <div className="employee-cell">
-                          <div className={`avatar employee-avatar avatar-${index % 4}`}>
-                            {employee.name.split(' ').map((part) => part[0]).join('')}
-                          </div>
-                          <div className="employee-info">
-                            <strong>{employee.name}</strong>
-                            <span>{employee.id} · {employee.email}</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td>{employee.department}</td>
-                      <td>{employee.country}</td>
-                      <td>
-                        <span className={`status-pill ${employee.status === 'Active' ? 'status-active' : 'status-leave'}`}>
-                          <span className="status-dot"></span>
-                          {employee.status}
-                        </span>
-                      </td>
-                      <td className="salary-cell">{employee.salary}</td>
-                      <td><button className="row-menu" aria-label={`More options for ${employee.name}`}>···</button></td>
-                    </tr>
-                  ))}
-                  {filteredEmployees.length === 0 && (
+                  {isLoadingEmployees && (
                     <tr>
                       <td colSpan={6} className="empty-state">
-                        No employees match your search or filters.
+                        Loading employees…
                       </td>
                     </tr>
                   )}
+
+                  {!isLoadingEmployees &&
+                    !employeeError &&
+                    filteredEmployees.map((employee, index) => {
+                      const name = `${employee.first_name} ${employee.last_name}`
+                      const isActive =
+                        employee.employment_status.toLowerCase() === 'active'
+
+                      return (
+                        <tr key={employee.id}>
+                          <td>
+                            <div className="employee-cell">
+                              <div
+                                className={`avatar employee-avatar avatar-${index % 4}`}
+                              >
+                                {employee.first_name[0]}
+                                {employee.last_name[0]}
+                              </div>
+                              <div className="employee-info">
+                                <strong>{name}</strong>
+                                <span>
+                                  {employee.employee_number} · {employee.email}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+                          <td>{employee.department}</td>
+                          <td>{employee.country.name}</td>
+                          <td>
+                            <span
+                              className={`status-pill ${isActive ? 'status-active' : 'status-leave'}`}
+                            >
+                              <span className="status-dot"></span>
+                              {formatStatus(employee.employment_status)}
+                            </span>
+                          </td>
+                          <td className="salary-cell">—</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="row-menu"
+                              aria-label={`More options for ${name}`}
+                              title="Employee actions are not available yet"
+                              onClick={() =>
+                                window.alert(
+                                  'Employee actions will be added in a later step.',
+                                )
+                              }
+                            >
+                              ···
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+
+                  {!isLoadingEmployees &&
+                    !employeeError &&
+                    filteredEmployees.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="empty-state">
+                          {employees.length === 0
+                            ? 'No employees were returned by the API.'
+                            : 'No employees match your search or filters.'}
+                        </td>
+                      </tr>
+                    )}
                 </tbody>
               </table>
             </div>
 
             <footer className="table-footer">
-              <span>Showing <strong>1–6</strong> of <strong>10,000</strong> employees</span>
-              <div className="pagination">
-                <button disabled>← Previous</button>
-                <button className="page-number">1</button>
-                <button>2</button>
-                <button>3</button>
-                <span>…</span>
-                <button>1,667</button>
-                <button>Next →</button>
-              </div>
+              <span>
+                Showing <strong>{filteredEmployees.length}</strong> of{' '}
+                <strong>{totalEmployees}</strong> employees returned by the API
+              </span>
             </footer>
           </section>
 
