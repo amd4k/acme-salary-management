@@ -49,7 +49,7 @@ For organization-level payroll and salary statistics, calculations will use the 
 ### 4. Security and Auditability
 
 * Require authentication for salary-management functionality.
-* Restrict salary-management operations to authorized HR users.
+* An authenticated HR user may manage employee salary information but cannot create or modify salary records for their own employee record. Salary changes must always record the authenticated user who performed the change.
 * Enforce authorization in the backend API, not only in the user interface.
 * Record salary changes in an auditable history.
 
