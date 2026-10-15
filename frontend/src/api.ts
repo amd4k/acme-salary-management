@@ -131,3 +131,72 @@ export async function fetchDashboardStatistics(
 
     return (data as DashboardStatisticsResponse).statistics
 }
+
+export interface SalaryRecord {
+    id: number
+    employee_id: number
+    amount: number
+    currency: string
+    effective_from: string
+    reason: string
+    created_by_id: number
+    updated_by_id: number | null
+    employee: {
+        id: number
+        employee_number: string
+        first_name: string
+        last_name: string
+        department: string
+        country: {
+            name: string
+            code: string
+        }
+    }
+}
+
+export interface SalaryRecordsResponse {
+    salary_records: SalaryRecord[]
+    pagination: {
+        page: number
+        per_page: number
+        total: number
+        total_pages: number
+    }
+}
+
+export interface SalaryRecordsQuery {
+    page: number
+    perPage?: number
+    search?: string
+}
+
+export async function fetchSalaryRecords(
+    token: string,
+    query: SalaryRecordsQuery,
+): Promise<SalaryRecordsResponse> {
+    const params = new URLSearchParams({
+        page: String(query.page),
+        per_page: String(query.perPage ?? 25),
+    })
+
+    if (query.search?.trim()) {
+        params.set('search', query.search.trim())
+    }
+
+    const response = await fetch(
+        `${API_BASE_URL}/api/v1/salary_records?${params.toString()}`,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        },
+    )
+
+    const data = await response.json()
+
+    if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch salary records')
+    }
+
+    return data as SalaryRecordsResponse
+}

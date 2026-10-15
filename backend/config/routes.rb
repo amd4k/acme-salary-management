@@ -7,6 +7,8 @@ Rails.application.routes.draw do
       post "login", to: "sessions#create"
       get "dashboard/statistics", to: "dashboard#statistics"
 
+      resources :salary_records, only: [:index]
+
       resources :employees, only: [:index, :show] do
         resources :salary_records, only: [:create, :update]
       end

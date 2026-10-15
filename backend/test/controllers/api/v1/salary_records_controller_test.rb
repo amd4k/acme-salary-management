@@ -37,6 +37,87 @@ class Api::V1::SalaryRecordsControllerTest < ActionDispatch::IntegrationTest
     @token = JsonWebToken.encode(@user.id)
   end
 
+  test "requires authentication to list salary records" do
+    get api_v1_salary_records_path
+
+    assert_response :unauthorized
+  end
+
+  test "lists salary records with employee and country details" do
+    SalaryRecord.create!(
+      employee: @employee,
+      amount: 60_000,
+      currency: "USD",
+      effective_from: Date.current,
+      reason: "Annual salary adjustment",
+      created_by: @user
+    )
+
+    get api_v1_salary_records_path,
+      headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :ok
+
+    response_body = JSON.parse(response.body)
+    records = response_body["salary_records"]
+
+    assert_equal 1, records.length
+    assert_equal 60_000, records.first["amount"].to_f
+    assert_equal "USD", records.first["currency"]
+    assert_equal "John", records.first.dig("employee", "first_name")
+    assert_equal "Smith", records.first.dig("employee", "last_name")
+    assert_equal "Engineering", records.first.dig("employee", "department")
+    assert_equal "US", records.first.dig("employee", "country", "code")
+    assert_equal 1, response_body.dig("pagination", "total")
+  end
+
+  test "searches salary records by employee full name" do
+    SalaryRecord.create!(
+      employee: @employee,
+      amount: 60_000,
+      currency: "USD",
+      effective_from: Date.current,
+      reason: "Annual salary adjustment",
+      created_by: @user
+    )
+
+    SalaryRecord.create!(
+      employee: @other_employee,
+      amount: 70_000,
+      currency: "USD",
+      effective_from: Date.current,
+      reason: "Promotion",
+      created_by: @user
+    )
+
+    get api_v1_salary_records_path,
+      params: { search: "John Smith" },
+      headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :ok
+
+    response_body = JSON.parse(response.body)
+
+    assert_equal 1, response_body["salary_records"].length
+    assert_equal(
+      "John",
+      response_body.dig("salary_records", 0, "employee", "first_name")
+    )
+    assert_equal 1, response_body.dig("pagination", "total")
+  end
+
+  test "rejects invalid salary record pagination parameters" do
+    get api_v1_salary_records_path,
+      params: { page: 0, per_page: 25 },
+      headers: { "Authorization" => "Bearer #{@token}" }
+
+    assert_response :bad_request
+    assert_equal(
+      "Invalid pagination parameters",
+      JSON.parse(response.body)["error"]
+    )
+  end
+
   test "requires authentication" do
     post api_v1_employee_salary_records_path(@employee), params: {
       salary_record: {
