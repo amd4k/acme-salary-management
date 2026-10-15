@@ -1119,3 +1119,63 @@ h1 {
   outline: 2px solid #8b79ff;
   outline-offset: 1px;
 }
+
+.salary-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  padding: 24px;
+  margin: 16px 0 24px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e2e5ef);
+  border-radius: 12px;
+  max-width: 900px;
+}
+
+.salary-form h2,
+.salary-form [role="alert"],
+.salary-form button[type="submit"] {
+  grid-column: 1 / -1;
+}
+
+.salary-form label {
+  align-self: end;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.salary-form input,
+.salary-form select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #d9deea);
+  border-radius: 7px;
+  background: var(--card-bg, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.salary-form button[type="submit"] {
+  justify-self: start;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 7px;
+  background: #5145cd;
+  color: white;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .salary-form {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
+
+  .salary-form h2,
+  .salary-form [role="alert"],
+  .salary-form button[type="submit"] {
+    grid-column: auto;
+  }
+}

@@ -200,3 +200,47 @@ export async function fetchSalaryRecords(
 
     return data as SalaryRecordsResponse
 }
+
+export interface CreateSalaryRecordInput {
+    employee_id: number
+    amount: number
+    currency: string
+    effective_from: string
+    reason: string
+}
+
+export async function createSalaryRecord(
+    token: string,
+    input: CreateSalaryRecordInput,
+) {
+    const response = await fetch(
+        `${API_BASE_URL}/api/v1/employees/${input.employee_id}/salary_records`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                salary_record: {
+                    amount: input.amount,
+                    currency: input.currency,
+                    effective_from: input.effective_from,
+                    reason: input.reason,
+                },
+            }),
+        },
+    )
+
+    const data = await response.json()
+
+    if (!response.ok) {
+        const message = Array.isArray(data.error)
+            ? data.error.join(', ')
+            : data.error || 'Failed to create salary record'
+
+        throw new Error(message)
+    }
+
+    return data
+}

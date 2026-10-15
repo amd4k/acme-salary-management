@@ -5,6 +5,7 @@ import {
   fetchDashboardStatistics,
   fetchEmployees,
   fetchSalaryRecords,
+  createSalaryRecord,
   login,
   type AuthUser,
   type DashboardStatistics,
@@ -48,8 +49,23 @@ function App() {
   const [salarySearch, setSalarySearch] = useState('')
   const [isLoadingSalaryRecords, setIsLoadingSalaryRecords] = useState(false)
   const [salaryRecordsError, setSalaryRecordsError] = useState('')
+
   const [salaryReloadKey, setSalaryReloadKey] = useState(0)
+  const [showSalaryForm, setShowSalaryForm] = useState(false)
+  const [salaryEmployeeId, setSalaryEmployeeId] = useState('')
+  const [salaryEmployeeOptions, setSalaryEmployeeOptions] = useState<Employee[]>([])
+  const [salaryEmployeeSearch, setSalaryEmployeeSearch] = useState('')
+  const [isLoadingSalaryEmployees, setIsLoadingSalaryEmployees] = useState(false)
+  const [salaryAmount, setSalaryAmount] = useState('')
+  const [salaryCurrency, setSalaryCurrency] = useState('USD')
+  const [salaryEffectiveFrom, setSalaryEffectiveFrom] = useState('')
+  const [salaryReason, setSalaryReason] = useState('')
+  const [salaryFormError, setSalaryFormError] = useState('')
+  const [salaryFormSuccess, setSalaryFormSuccess] = useState('')
+  const [isSavingSalary, setIsSavingSalary] = useState(false)
+
   const [employeePagination, setEmployeePagination] = useState({
+
     page: 1,
     per_page: 25,
     total: 0,
@@ -209,6 +225,42 @@ function App() {
     }
   }, [authToken, activePage, salaryPage, salarySearch, salaryReloadKey])
 
+  useEffect(() => {
+    if (!authToken || !showSalaryForm) return
+
+    let cancelled = false
+
+    const timeoutId = window.setTimeout(async () => {
+      setIsLoadingSalaryEmployees(true)
+      setSalaryFormError('')
+
+      try {
+        const result = await fetchEmployees(authToken, {
+          page: 1,
+          perPage: 100,
+          search: salaryEmployeeSearch,
+        })
+
+        if (!cancelled) {
+          setSalaryEmployeeOptions(result.employees)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSalaryFormError(
+            error instanceof Error ? error.message : 'Failed to load employees',
+          )
+        }
+      } finally {
+        if (!cancelled) setIsLoadingSalaryEmployees(false)
+      }
+    }, salaryEmployeeSearch.trim() ? 250 : 0)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [authToken, showSalaryForm, salaryEmployeeSearch])
+
   // These are the departments/statuses used by the current ACME seed data.
   // Filtering itself happens on the server across all employees, not just this page.
   const departments = [
@@ -248,6 +300,56 @@ function App() {
       )
     } finally {
       setIsLoggingIn(false)
+    }
+  }
+
+
+  async function handleCreateSalaryRecord(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault()
+    setSalaryFormError('')
+    setSalaryFormSuccess('')
+
+    const employeeId = Number(salaryEmployeeId)
+    const amount = Number(salaryAmount)
+
+    if (!Number.isInteger(employeeId) || employeeId < 1) {
+      setSalaryFormError('Enter a valid employee database ID.')
+      return
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setSalaryFormError('Salary amount must be greater than zero.')
+      return
+    }
+
+    setIsSavingSalary(true)
+
+    try {
+      await createSalaryRecord(authToken!, {
+        employee_id: employeeId,
+        amount,
+        currency: salaryCurrency,
+        effective_from: salaryEffectiveFrom,
+        reason: salaryReason.trim(),
+      })
+
+      setSalaryFormSuccess('Salary record created successfully.')
+      setSalaryEmployeeId('')
+      setSalaryAmount('')
+      setSalaryCurrency('USD')
+      setSalaryEffectiveFrom('')
+      setSalaryReason('')
+      setSalaryPage(1)
+      setSalaryReloadKey((key) => key + 1)
+      setShowSalaryForm(false)
+    } catch (error) {
+      setSalaryFormError(
+        error instanceof Error ? error.message : 'Failed to create salary record',
+      )
+    } finally {
+      setIsSavingSalary(false)
     }
   }
 
@@ -856,6 +958,7 @@ function App() {
                 </div>
               </section>
 
+
               <div className="directory-heading">
                 <div>
                   <h2>All salary records</h2>
@@ -863,7 +966,113 @@ function App() {
                     {salaryPagination.total.toLocaleString()} records across employees.
                   </p>
                 </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setSalaryFormError('')
+                    setSalaryFormSuccess('')
+                    setShowSalaryForm((show) => !show)
+                  }}
+                >
+                  {showSalaryForm ? 'Cancel' : '+ Add salary record'}
+                </button>
               </div>
+
+              {salaryFormSuccess && (
+                <p role="status">{salaryFormSuccess}</p>
+              )}
+
+              {showSalaryForm && (
+                <form
+                  className="salary-form"
+                  onSubmit={handleCreateSalaryRecord}
+                >
+                  <h2>New salary record</h2>
+
+                  <label htmlFor="salary-employee-search">Search employee</label>
+                  <input
+                    id="salary-employee-search"
+                    type="search"
+                    placeholder="Name or employee number"
+                    value={salaryEmployeeSearch}
+                    onChange={(event) => {
+                      setSalaryEmployeeSearch(event.target.value)
+                      setSalaryEmployeeId('')
+                    }}
+                  />
+
+                  <label htmlFor="salary-employee-id">Select employee</label>
+                  <select
+                    id="salary-employee-id"
+                    required
+                    value={salaryEmployeeId}
+                    onChange={(event) => setSalaryEmployeeId(event.target.value)}
+                  >
+                    <option value="">
+                      {isLoadingSalaryEmployees ? 'Loading employees...' : 'Choose an employee'}
+                    </option>
+                    {salaryEmployeeOptions.map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.first_name} {employee.last_name} — {employee.employee_number}
+                      </option>
+                    ))}
+                  </select>
+
+                  <label htmlFor="salary-amount">Annual salary amount</label>
+                  <input
+                    id="salary-amount"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    required
+                    value={salaryAmount}
+                    onChange={(event) => setSalaryAmount(event.target.value)}
+                  />
+
+                  <label htmlFor="salary-currency">Currency</label>
+                  <select
+                    id="salary-currency"
+                    value={salaryCurrency}
+                    onChange={(event) => setSalaryCurrency(event.target.value)}
+                  >
+                    {['USD', 'INR', 'GBP', 'EUR', 'CAD', 'AUD', 'SGD', 'NZD'].map(
+                      (currency) => (
+                        <option key={currency} value={currency}>
+                          {currency}
+                        </option>
+                      ),
+                    )}
+                  </select>
+
+                  <label htmlFor="salary-effective-from">Effective from</label>
+                  <input
+                    id="salary-effective-from"
+                    type="date"
+                    required
+                    value={salaryEffectiveFrom}
+                    onChange={(event) => setSalaryEffectiveFrom(event.target.value)}
+                  />
+
+                  <label htmlFor="salary-reason">Reason</label>
+                  <input
+                    id="salary-reason"
+                    type="text"
+                    required
+                    maxLength={500}
+                    value={salaryReason}
+                    onChange={(event) => setSalaryReason(event.target.value)}
+                  />
+
+                  {salaryFormError && (
+                    <p role="alert">{salaryFormError}</p>
+                  )}
+
+                  <button type="submit" disabled={isSavingSalary}>
+                    {isSavingSalary ? 'Saving…' : 'Create salary record'}
+                  </button>
+                </form>
+              )}
 
               <div className="table-toolbar">
                 <label className="search-box">
