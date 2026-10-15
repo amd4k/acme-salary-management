@@ -1008,3 +1008,114 @@ h1 {
 .theme-dark .empty-state {
   color: #a4aec3 !important;
 }
+
+/* Employee directory pagination */
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.pagination-page {
+  white-space: nowrap;
+  font-size: 0.875rem;
+}
+
+.pagination-button {
+  white-space: nowrap;
+}
+
+.pagination-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .table-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pagination-controls {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+}
+
+
+.directory-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.top-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.page-jump-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 0.875rem;
+}
+
+.page-jump-input {
+  width: 70px;
+  min-width: 0;
+  padding: 8px;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .directory-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .directory-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 560px) {
+  .directory-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .top-pagination {
+    flex-wrap: wrap;
+  }
+}
+
+/* Page-number input in dark mode */
+.app-shell.theme-dark .top-pagination .page-jump-input {
+  background-color: #20283a;
+  color: #e8eefc;
+  border: 1px solid #39445b;
+  color-scheme: dark;
+}
+
+.app-shell.theme-dark .top-pagination .page-jump-input:focus {
+  outline: 2px solid #8b79ff;
+  outline-offset: 1px;
+}

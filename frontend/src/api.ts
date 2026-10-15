@@ -49,7 +49,7 @@ export interface Employee {
     }
 }
 
-interface EmployeesResponse {
+export interface EmployeesResponse {
     employees: Employee[]
     pagination: {
         page: number
@@ -59,11 +59,31 @@ interface EmployeesResponse {
     }
 }
 
+export interface EmployeeQuery {
+    page: number
+    perPage?: number
+    search?: string
+    department?: string
+    employmentStatus?: string
+    countryId?: number
+}
+
 export async function fetchEmployees(
     token: string,
+    query: EmployeeQuery,
 ): Promise<EmployeesResponse> {
+    const params = new URLSearchParams({
+        page: String(query.page),
+        per_page: String(query.perPage ?? 25),
+    })
+
+    if (query.search?.trim()) params.set('search', query.search.trim())
+    if (query.department) params.set('department', query.department)
+    if (query.employmentStatus) params.set('employment_status', query.employmentStatus)
+    if (query.countryId) params.set('country_id', String(query.countryId))
+
     const response = await fetch(
-        `${API_BASE_URL}/api/v1/employees?per_page=25`,
+        `${API_BASE_URL}/api/v1/employees?${params.toString()}`,
         {
             headers: {
                 Authorization: `Bearer ${token}`,

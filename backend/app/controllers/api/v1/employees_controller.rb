@@ -12,13 +12,14 @@ class Api::V1::EmployeesController < ApplicationController
     employees = Employee.includes(:country)
 
     if params[:search].present?
-      search = "%#{params[:search]}%"
+      search = "%#{params[:search].strip}%"
 
       employees = employees.where(
         "employee_number ILIKE :search
-         OR first_name ILIKE :search
-         OR last_name ILIKE :search
-         OR email ILIKE :search",
+        OR first_name ILIKE :search
+        OR last_name ILIKE :search
+        OR email ILIKE :search
+        OR (first_name || ' ' || last_name) ILIKE :search",
         search: search
       )
     end
