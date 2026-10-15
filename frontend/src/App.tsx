@@ -4,12 +4,14 @@ import './App.css'
 import {
   fetchDashboardStatistics,
   fetchEmployees,
+  fetchEmployeeDetails,
   fetchSalaryRecords,
   createSalaryRecord,
   login,
   type AuthUser,
   type DashboardStatistics,
   type Employee,
+  type EmployeeDetailsResponse,
   type SalaryRecord,
 } from './api'
 
@@ -38,6 +40,10 @@ function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false)
 
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null)
+  const [employeeDetails, setEmployeeDetails] = useState<EmployeeDetailsResponse | null>(null)
+  const [isLoadingEmployeeDetails, setIsLoadingEmployeeDetails] = useState(false)
+  const [employeeDetailsError, setEmployeeDetailsError] = useState('')
   const [salaryRecords, setSalaryRecords] = useState<SalaryRecord[]>([])
   const [salaryPagination, setSalaryPagination] = useState({
     page: 1,
@@ -52,6 +58,7 @@ function App() {
 
   const [salaryReloadKey, setSalaryReloadKey] = useState(0)
   const [showSalaryForm, setShowSalaryForm] = useState(false)
+  const [editingSalaryRecord, setEditingSalaryRecord] = useState<SalaryRecord | null>(null)
   const [salaryEmployeeId, setSalaryEmployeeId] = useState('')
   const [salaryEmployeeOptions, setSalaryEmployeeOptions] = useState<Employee[]>([])
   const [salaryEmployeeSearch, setSalaryEmployeeSearch] = useState('')
@@ -314,8 +321,11 @@ function App() {
     const employeeId = Number(salaryEmployeeId)
     const amount = Number(salaryAmount)
 
-    if (!Number.isInteger(employeeId) || employeeId < 1) {
-      setSalaryFormError('Enter a valid employee database ID.')
+    if (
+      !editingSalaryRecord &&
+      (!Number.isInteger(employeeId) || employeeId < 1)
+    ) {
+      setSalaryFormError('Please select an employee from the list.')
       return
     }
 
@@ -327,16 +337,60 @@ function App() {
     setIsSavingSalary(true)
 
     try {
-      await createSalaryRecord(authToken!, {
-        employee_id: employeeId,
+      const selectedEmployeeId = editingSalaryRecord
+        ? editingSalaryRecord.employee_id
+        : employeeId
+
+      // If this employee already has salary history, reference their latest
+      // scheduled record so the API can reject stale/out-of-order changes.
+      let basedOnSalaryRecordId = editingSalaryRecord?.id
+
+      if (!editingSalaryRecord) {
+        const selectedEmployee = salaryEmployeeOptions.find(
+          (employee) => employee.id === selectedEmployeeId,
+        )
+
+        if (!selectedEmployee) {
+          setSalaryFormError('Please select an employee from the list.')
+          return
+        }
+
+        const existingRecords = await fetchSalaryRecords(authToken!, {
+          page: 1,
+          perPage: 100,
+          search: selectedEmployee.employee_number,
+        })
+
+        const latestRecord = existingRecords.salary_records.find(
+          (record) =>
+            record.employee_id === selectedEmployeeId &&
+            record.is_latest_scheduled,
+        )
+
+        basedOnSalaryRecordId = latestRecord?.id
+      }
+
+      const input = {
+        employee_id: selectedEmployeeId,
         amount,
         currency: salaryCurrency,
         effective_from: salaryEffectiveFrom,
         reason: salaryReason.trim(),
-      })
+        ...(basedOnSalaryRecordId !== undefined
+          ? { based_on_salary_record_id: basedOnSalaryRecordId }
+          : {}),
+      }
 
-      setSalaryFormSuccess('Salary record created successfully.')
+      await createSalaryRecord(authToken!, input)
+      setSalaryFormSuccess(
+        editingSalaryRecord
+          ? 'Salary change scheduled successfully. Previous salary records were preserved.'
+          : 'Salary record created successfully.',
+      )
+
+      setEditingSalaryRecord(null)
       setSalaryEmployeeId('')
+      setSalaryEmployeeSearch('')
       setSalaryAmount('')
       setSalaryCurrency('USD')
       setSalaryEffectiveFrom('')
@@ -346,16 +400,57 @@ function App() {
       setShowSalaryForm(false)
     } catch (error) {
       setSalaryFormError(
-        error instanceof Error ? error.message : 'Failed to create salary record',
+        error instanceof Error ? error.message : 'Failed to save salary record',
       )
     } finally {
       setIsSavingSalary(false)
     }
   }
 
+  function handleEditSalaryRecord(record: SalaryRecord) {
+    setEditingSalaryRecord(record)
+    setSalaryEmployeeId(String(record.employee_id))
+    setSalaryEmployeeSearch(
+      `${record.employee.first_name} ${record.employee.last_name} ${record.employee.employee_number}`,
+    )
+    setSalaryAmount(String(record.amount))
+    setSalaryCurrency(record.currency)
+    setSalaryEffectiveFrom(record.effective_from)
+    setSalaryReason(record.reason)
+    setSalaryFormError('')
+    setSalaryFormSuccess('')
+    setShowSalaryForm(true)
+  }
+
+  async function handleOpenEmployeeDetails(employeeId: number) {
+    setSelectedEmployeeId(employeeId)
+    setEmployeeDetails(null)
+    setEmployeeDetailsError('')
+    setIsLoadingEmployeeDetails(true)
+
+    try {
+      const result = await fetchEmployeeDetails(authToken!, employeeId)
+      setEmployeeDetails(result)
+    } catch (error) {
+      setEmployeeDetailsError(
+        error instanceof Error ? error.message : 'Failed to load employee details',
+      )
+    } finally {
+      setIsLoadingEmployeeDetails(false)
+    }
+  }
+
+  function handleCloseEmployeeDetails() {
+    setSelectedEmployeeId(null)
+    setEmployeeDetails(null)
+    setEmployeeDetailsError('')
+    setIsLoadingEmployeeDetails(false)
+  }
+
   function handleLogout() {
     setAuthToken(null)
     setAuthUser(null)
+    handleCloseEmployeeDetails()
     setEmployees([])
     setEmployeePagination({ page: 1, per_page: 25, total: 0, total_pages: 0 })
     setCurrentPage(1)
@@ -453,6 +548,7 @@ function App() {
               onClick={(event) => {
                 event.preventDefault()
                 setActivePage(item.label as Page)
+                if (item.label === 'Employees') handleCloseEmployeeDetails()
               }}
             >
               <span className="nav-icon">{item.icon}</span>
@@ -532,420 +628,555 @@ function App() {
 
         <div className="page-content">
           {activePage === 'Employees' ? (
-            <>
-              <section className="page-heading">
-                <div>
-                  <div className="eyebrow">PEOPLE MANAGEMENT</div>
-                  <h1>Employees</h1>
-                  <p className="page-description">
-                    Manage your people, compensation and employee information.
-                  </p>
-                </div>
-              </section>
+            selectedEmployeeId !== null ? (
+              <section className="employee-detail-view">
+                <button
+                  type="button"
+                  className="secondary-button employee-detail-back"
+                  onClick={handleCloseEmployeeDetails}
+                >
+                  ← Back to employees
+                </button>
 
+                {isLoadingEmployeeDetails && (
+                  <div className="empty-state" role="status">Loading employee details…</div>
+                )}
 
-              {employeeError && (
-                <div role="alert" className="empty-state">
-                  <p>Could not load employees: {employeeError}</p>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={isLoadingEmployees}
-                    onClick={async () => {
-                      setEmployeeError('')
-                      setIsLoadingEmployees(true)
-
-                      try {
-                        const result = await fetchEmployees(authToken, {
-                          page: currentPage,
-                          perPage: 25,
-                          search,
-                          department: departmentFilter,
-                          employmentStatus: statusFilter,
-                        })
-                        setEmployees(result.employees)
-                        setEmployeePagination(result.pagination)
-                      } catch (error) {
-                        setEmployeeError(
-                          error instanceof Error
-                            ? error.message
-                            : 'Failed to load employees',
-                        )
-                      } finally {
-                        setIsLoadingEmployees(false)
-                      }
-                    }}
-                  >
-                    {isLoadingEmployees ? 'Retrying…' : 'Retry employees'}
-                  </button>
-                </div>
-              )}
-
-
-              {statisticsError && (
-                <div role="alert" className="empty-state">
-                  <p>Could not load dashboard statistics: {statisticsError}</p>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={isLoadingStatistics}
-                    onClick={async () => {
-                      setStatisticsError('')
-                      setIsLoadingStatistics(true)
-
-                      try {
-                        const result = await fetchDashboardStatistics(authToken)
-                        setStatistics(result)
-                      } catch (error) {
-                        setStatisticsError(
-                          error instanceof Error
-                            ? error.message
-                            : 'Failed to load dashboard statistics',
-                        )
-                      } finally {
-                        setIsLoadingStatistics(false)
-                      }
-                    }}
-                  >
-                    {isLoadingStatistics ? 'Retrying…' : 'Retry statistics'}
-                  </button>
-                </div>
-              )}
-
-              <section className="stats-grid">
-                <article className="stat-card">
-                  <div className="stat-top">
-                    <span>Total employees</span>
-                    <span className="stat-icon icon-indigo">♙</span>
-                  </div>
-                  <div className="stat-value">
-                    {isLoadingStatistics ? '…' : totalEmployees}
-                  </div>
-                  <div className="stat-foot">Across the organization</div>
-                </article>
-
-                <article className="stat-card">
-                  <div className="stat-top">
-                    <span>Active employees</span>
-                    <span className="stat-icon icon-green">✓</span>
-                  </div>
-                  <div className="stat-value">
-                    {isLoadingStatistics ? '…' : activeEmployees}
-                  </div>
-                  <div className="stat-foot">
-                    {isLoadingStatistics
-                      ? 'Loading statistics…'
-                      : totalEmployees === 0
-                        ? 'No employee data yet'
-                        : `${((activeEmployees / totalEmployees) * 100).toFixed(1)}% of all employees`}
-                  </div>
-                </article>
-
-                <article className="stat-card">
-                  <div className="stat-top">
-                    <span>Active departments</span>
-                    <span className="stat-icon icon-orange">▦</span>
-                  </div>
-                  <div className="stat-value">
-                    {isLoadingStatistics ? '…' : totalDepartments}
-                  </div>
-                  <div className="stat-foot">
-                    Distinct departments with active employees
-                  </div>
-                </article>
-
-                <article className="stat-card">
-                  <div className="stat-top">
-                    <span>Countries with active employees</span>
-                    <span className="stat-icon icon-blue">◎</span>
-                  </div>
-                  <div className="stat-value">
-                    {isLoadingStatistics ? '…' : totalCountries}
-                  </div>
-                  <div className="stat-foot">
-                    Distinct countries with active employees
-                  </div>
-                </article>
-              </section>
-
-              <div className="directory-heading">
-                <div>
-                  <h2>All employees</h2>
-                  <p>Search and manage your employee directory.</p>
-                </div>
-
-                <div className="directory-actions">
-                  <form
-                    className="top-pagination"
-                    onSubmit={(event) => {
-                      event.preventDefault()
-                      handlePageJump()
-                    }}
-                  >
+                {employeeDetailsError && (
+                  <div className="empty-state" role="alert">
+                    <p>Could not load employee details: {employeeDetailsError}</p>
                     <button
                       type="button"
                       className="secondary-button"
-                      disabled={isLoadingEmployees || currentPage <= 1}
-                      onClick={() => goToPage(currentPage - 1)}
-                      aria-label="Previous page"
+                      onClick={() => void handleOpenEmployeeDetails(selectedEmployeeId)}
                     >
-                      ←
+                      Try again
                     </button>
+                  </div>
+                )}
 
-                    <label className="page-jump-label">
-                      Page
-                      <input
-                        className="page-jump-input"
-                        type="number"
-                        min={1}
-                        max={employeePagination.total_pages}
-                        value={pageInput}
-                        onChange={(event) => setPageInput(event.target.value)}
-                        aria-label="Go to page number"
-                      />
-                      of {employeePagination.total_pages}
-                    </label>
+                {employeeDetails && (
+                  <>
+                    <section className="page-heading employee-detail-heading">
+                      <div>
+                        <div className="eyebrow">EMPLOYEE PROFILE</div>
+                        <h1>{employeeDetails.employee.first_name} {employeeDetails.employee.last_name}</h1>
+                        <p className="page-description">
+                          {employeeDetails.employee.employee_number} · {employeeDetails.employee.email}
+                        </p>
+                      </div>
+                      <span className={`status-pill ${employeeDetails.employee.employment_status.toLowerCase() === 'active' ? 'status-active' : 'status-leave'}`}>
+                        <span className="status-dot"></span>
+                        {formatStatus(employeeDetails.employee.employment_status)}
+                      </span>
+                    </section>
 
+                    <div className="employee-detail-grid">
+                      <section className="detail-card">
+                        <span className="detail-label">DEPARTMENT</span>
+                        <strong>{employeeDetails.employee.department}</strong>
+                      </section>
+                      <section className="detail-card">
+                        <span className="detail-label">COUNTRY</span>
+                        <strong>{employeeDetails.employee.country.name} ({employeeDetails.employee.country.code})</strong>
+                      </section>
+                      <section className="detail-card detail-current-salary">
+                        <span className="detail-label">CURRENT ANNUAL SALARY</span>
+                        {employeeDetails.current_salary ? (
+                          <strong>
+                            {employeeDetails.current_salary.currency}{' '}
+                            {Number(employeeDetails.current_salary.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </strong>
+                        ) : (
+                          <strong>Not set</strong>
+                        )}
+                        {employeeDetails.current_salary && (
+                          <span>Effective {employeeDetails.current_salary.effective_from}</span>
+                        )}
+                      </section>
+                    </div>
+
+                    <section className="employee-history-section">
+                      <div className="section-heading-row">
+                        <div>
+                          <h2>Salary history</h2>
+                          <p className="page-description">Previous salary records and scheduled changes, newest effective date first.</p>
+                        </div>
+                        <span className="history-count">{employeeDetails.salary_history.length} records</span>
+                      </div>
+
+                      {employeeDetails.salary_history.length === 0 ? (
+                        <div className="empty-state">No salary records have been added for this employee.</div>
+                      ) : (
+                        <div className="table-scroll">
+                          <table className="employee-table salary-history-table">
+                            <thead>
+                              <tr>
+                                <th>STATUS</th>
+                                <th>EFFECTIVE FROM</th>
+                                <th>ANNUAL SALARY</th>
+                                <th>REASON</th>
+                                <th>RECORD ID</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {employeeDetails.salary_history.map((record) => {
+                                const isFuture = record.effective_from > new Date().toISOString().slice(0, 10)
+                                const isCurrent = employeeDetails.current_salary?.id === record.id
+                                const label = isFuture ? 'Scheduled' : isCurrent ? 'Current' : 'Historical'
+                                return (
+                                  <tr key={record.id} className={isFuture ? 'future-salary-row' : undefined}>
+                                    <td><span className={`history-status ${isFuture ? 'history-scheduled' : isCurrent ? 'history-current' : 'history-past'}`}>{label}</span></td>
+                                    <td>{record.effective_from}</td>
+                                    <td className="salary-cell">
+                                      {record.currency}{' '}
+                                      {Number(record.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                    <td>{record.reason}</td>
+                                    <td>#{record.id}</td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </section>
+                  </>
+                )}
+              </section>
+            ) : (
+              <>
+                <section className="page-heading">
+                  <div>
+                    <div className="eyebrow">PEOPLE MANAGEMENT</div>
+                    <h1>Employees</h1>
+                    <p className="page-description">
+                      Manage your people, compensation and employee information.
+                    </p>
+                  </div>
+                </section>
+
+
+                {employeeError && (
+                  <div role="alert" className="empty-state">
+                    <p>Could not load employees: {employeeError}</p>
                     <button
-                      type="submit"
+                      type="button"
                       className="secondary-button"
-                      disabled={isLoadingEmployees || employeePagination.total_pages === 0}
+                      disabled={isLoadingEmployees}
+                      onClick={async () => {
+                        setEmployeeError('')
+                        setIsLoadingEmployees(true)
+
+                        try {
+                          const result = await fetchEmployees(authToken, {
+                            page: currentPage,
+                            perPage: 25,
+                            search,
+                            department: departmentFilter,
+                            employmentStatus: statusFilter,
+                          })
+                          setEmployees(result.employees)
+                          setEmployeePagination(result.pagination)
+                        } catch (error) {
+                          setEmployeeError(
+                            error instanceof Error
+                              ? error.message
+                              : 'Failed to load employees',
+                          )
+                        } finally {
+                          setIsLoadingEmployees(false)
+                        }
+                      }}
                     >
-                      Go
+                      {isLoadingEmployees ? 'Retrying…' : 'Retry employees'}
                     </button>
+                  </div>
+                )}
+
+
+                {statisticsError && (
+                  <div role="alert" className="empty-state">
+                    <p>Could not load dashboard statistics: {statisticsError}</p>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={isLoadingStatistics}
+                      onClick={async () => {
+                        setStatisticsError('')
+                        setIsLoadingStatistics(true)
+
+                        try {
+                          const result = await fetchDashboardStatistics(authToken)
+                          setStatistics(result)
+                        } catch (error) {
+                          setStatisticsError(
+                            error instanceof Error
+                              ? error.message
+                              : 'Failed to load dashboard statistics',
+                          )
+                        } finally {
+                          setIsLoadingStatistics(false)
+                        }
+                      }}
+                    >
+                      {isLoadingStatistics ? 'Retrying…' : 'Retry statistics'}
+                    </button>
+                  </div>
+                )}
+
+                <section className="stats-grid">
+                  <article className="stat-card">
+                    <div className="stat-top">
+                      <span>Total employees</span>
+                      <span className="stat-icon icon-indigo">♙</span>
+                    </div>
+                    <div className="stat-value">
+                      {isLoadingStatistics ? '…' : totalEmployees}
+                    </div>
+                    <div className="stat-foot">Across the organization</div>
+                  </article>
+
+                  <article className="stat-card">
+                    <div className="stat-top">
+                      <span>Active employees</span>
+                      <span className="stat-icon icon-green">✓</span>
+                    </div>
+                    <div className="stat-value">
+                      {isLoadingStatistics ? '…' : activeEmployees}
+                    </div>
+                    <div className="stat-foot">
+                      {isLoadingStatistics
+                        ? 'Loading statistics…'
+                        : totalEmployees === 0
+                          ? 'No employee data yet'
+                          : `${((activeEmployees / totalEmployees) * 100).toFixed(1)}% of all employees`}
+                    </div>
+                  </article>
+
+                  <article className="stat-card">
+                    <div className="stat-top">
+                      <span>Active departments</span>
+                      <span className="stat-icon icon-orange">▦</span>
+                    </div>
+                    <div className="stat-value">
+                      {isLoadingStatistics ? '…' : totalDepartments}
+                    </div>
+                    <div className="stat-foot">
+                      Distinct departments with active employees
+                    </div>
+                  </article>
+
+                  <article className="stat-card">
+                    <div className="stat-top">
+                      <span>Countries with active employees</span>
+                      <span className="stat-icon icon-blue">◎</span>
+                    </div>
+                    <div className="stat-value">
+                      {isLoadingStatistics ? '…' : totalCountries}
+                    </div>
+                    <div className="stat-foot">
+                      Distinct countries with active employees
+                    </div>
+                  </article>
+                </section>
+
+                <div className="directory-heading">
+                  <div>
+                    <h2>All employees</h2>
+                    <p>Search and manage your employee directory.</p>
+                  </div>
+
+                  <div className="directory-actions">
+                    <form
+                      className="top-pagination"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        handlePageJump()
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={isLoadingEmployees || currentPage <= 1}
+                        onClick={() => goToPage(currentPage - 1)}
+                        aria-label="Previous page"
+                      >
+                        ←
+                      </button>
+
+                      <label className="page-jump-label">
+                        Page
+                        <input
+                          className="page-jump-input"
+                          type="number"
+                          min={1}
+                          max={employeePagination.total_pages}
+                          value={pageInput}
+                          onChange={(event) => setPageInput(event.target.value)}
+                          aria-label="Go to page number"
+                        />
+                        of {employeePagination.total_pages}
+                      </label>
+
+                      <button
+                        type="submit"
+                        className="secondary-button"
+                        disabled={isLoadingEmployees || employeePagination.total_pages === 0}
+                      >
+                        Go
+                      </button>
+
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={
+                          isLoadingEmployees ||
+                          currentPage >= employeePagination.total_pages
+                        }
+                        onClick={() => goToPage(currentPage + 1)}
+                        aria-label="Next page"
+                      >
+                        →
+                      </button>
+                    </form>
 
                     <button
                       type="button"
                       className="secondary-button"
-                      disabled={
-                        isLoadingEmployees ||
-                        currentPage >= employeePagination.total_pages
-                      }
-                      onClick={() => goToPage(currentPage + 1)}
-                      aria-label="Next page"
+                      onClick={() => window.print()}
                     >
-                      →
+                      ↓ Export
                     </button>
-                  </form>
-
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => window.print()}
-                  >
-                    ↓ Export
-                  </button>
+                  </div>
                 </div>
-              </div>
 
 
-              <div className="table-toolbar">
-                <label className="search-box">
-                  <span>⌕</span>
-                  <input
-                    type="search"
-                    placeholder="Search by name, ID or email..."
-                    aria-label="Search employees"
-                    value={search}
+                <div className="table-toolbar">
+                  <label className="search-box">
+                    <span>⌕</span>
+                    <input
+                      type="search"
+                      placeholder="Search by name, ID or email..."
+                      aria-label="Search employees"
+                      value={search}
+                      onChange={(event) => {
+                        setSearch(event.target.value)
+                        setCurrentPage(1)
+                        setPageInput('1')
+                      }}
+                    />
+                  </label>
+
+                  <select
+                    aria-label="Filter by department"
+                    value={departmentFilter}
                     onChange={(event) => {
-                      setSearch(event.target.value)
+                      setDepartmentFilter(event.target.value)
                       setCurrentPage(1)
                       setPageInput('1')
                     }}
-                  />
-                </label>
+                  >
+                    <option value="">All departments</option>
+                    {departments.map((department) => (
+                      <option key={department} value={department}>
+                        {department}
+                      </option>
+                    ))}
+                  </select>
 
-                <select
-                  aria-label="Filter by department"
-                  value={departmentFilter}
-                  onChange={(event) => {
-                    setDepartmentFilter(event.target.value)
-                    setCurrentPage(1)
-                    setPageInput('1')
-                  }}
-                >
-                  <option value="">All departments</option>
-                  {departments.map((department) => (
-                    <option key={department} value={department}>
-                      {department}
-                    </option>
-                  ))}
-                </select>
+                  <select
+                    aria-label="Filter by status"
+                    value={statusFilter}
+                    onChange={(event) => {
+                      setStatusFilter(event.target.value)
+                      setCurrentPage(1)
+                      setPageInput('1')
+                    }}
+                  >
+                    <option value="">All statuses</option>
+                    {statuses.map((status) => (
+                      <option key={status} value={status}>
+                        {formatStatus(status)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Filter by country"
+                    value={countryFilter}
+                    onChange={(event) => {
+                      setCountryFilter(event.target.value)
+                      setCurrentPage(1)
+                      setPageInput('1')
+                    }}
+                  >
+                    <option value="">All countries</option>
+                    <option value="1">United States</option>
+                    <option value="2">India</option>
+                    <option value="3">United Kingdom</option>
+                    <option value="4">Germany</option>
+                    <option value="5">Canada</option>
+                    <option value="6">Australia</option>
+                    <option value="7">Singapore</option>
+                    <option value="8">Netherlands</option>
+                  </select>
+                </div>
 
-                <select
-                  aria-label="Filter by status"
-                  value={statusFilter}
-                  onChange={(event) => {
-                    setStatusFilter(event.target.value)
-                    setCurrentPage(1)
-                    setPageInput('1')
-                  }}
-                >
-                  <option value="">All statuses</option>
-                  {statuses.map((status) => (
-                    <option key={status} value={status}>
-                      {formatStatus(status)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label="Filter by country"
-                  value={countryFilter}
-                  onChange={(event) => {
-                    setCountryFilter(event.target.value)
-                    setCurrentPage(1)
-                    setPageInput('1')
-                  }}
-                >
-                  <option value="">All countries</option>
-                  <option value="1">United States</option>
-                  <option value="2">India</option>
-                  <option value="3">United Kingdom</option>
-                  <option value="4">Germany</option>
-                  <option value="5">Canada</option>
-                  <option value="6">Australia</option>
-                  <option value="7">Singapore</option>
-                  <option value="8">Netherlands</option>
-                </select>
-              </div>
-
-              <div className="table-scroll">
-                <table className="employee-table">
-                  <thead>
-                    <tr>
-                      <th>EMPLOYEE</th>
-                      <th>DEPARTMENT</th>
-                      <th>COUNTRY</th>
-                      <th>STATUS</th>
-                      <th>ANNUAL SALARY</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {isLoadingEmployees && (
+                <div className="table-scroll">
+                  <table className="employee-table">
+                    <thead>
                       <tr>
-                        <td colSpan={6} className="empty-state">
-                          Loading employees…
-                        </td>
+                        <th>EMPLOYEE</th>
+                        <th>DEPARTMENT</th>
+                        <th>COUNTRY</th>
+                        <th>STATUS</th>
+                        <th>ANNUAL SALARY</th>
+                        <th></th>
                       </tr>
-                    )}
+                    </thead>
 
-                    {!isLoadingEmployees &&
-                      !employeeError &&
-                      filteredEmployees.map((employee, index) => {
-                        const name = `${employee.first_name} ${employee.last_name}`
-                        const isActive =
-                          employee.employment_status.toLowerCase() === 'active'
-
-                        return (
-                          <tr key={employee.id}>
-                            <td>
-                              <div className="employee-cell">
-                                <div
-                                  className={`avatar employee-avatar avatar-${index % 4}`}
-                                >
-                                  {employee.first_name[0]}
-                                  {employee.last_name[0]}
-                                </div>
-                                <div className="employee-info">
-                                  <strong>{name}</strong>
-                                  <span>
-                                    {employee.employee_number} · {employee.email}
-                                  </span>
-                                </div>
-                              </div>
-                            </td>
-                            <td>{employee.department}</td>
-                            <td>{employee.country.name}</td>
-                            <td>
-                              <span
-                                className={`status-pill ${isActive ? 'status-active' : 'status-leave'}`}
-                              >
-                                <span className="status-dot"></span>
-                                {formatStatus(employee.employment_status)}
-                              </span>
-                            </td>
-                            <td className="salary-cell">—</td>
-                            <td>
-                              <button
-                                type="button"
-                                className="row-menu"
-                                aria-label={`More options for ${name}`}
-                                title="Employee actions are not available yet"
-                                onClick={() =>
-                                  window.alert(
-                                    'Employee actions will be added in a later step.',
-                                  )
-                                }
-                              >
-                                ···
-                              </button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-
-                    {!isLoadingEmployees &&
-                      !employeeError &&
-                      filteredEmployees.length === 0 && (
+                    <tbody>
+                      {isLoadingEmployees && (
                         <tr>
                           <td colSpan={6} className="empty-state">
-                            {employees.length === 0
-                              ? 'No employees were returned by the API.'
-                              : 'No employees match your search or filters.'}
+                            Loading employees…
                           </td>
                         </tr>
                       )}
-                  </tbody>
-                </table>
-              </div>
 
-              <footer className="table-footer">
-                <span>
-                  {employeePagination.total === 0 ? (
-                    'Showing 0 of 0 matching employees'
-                  ) : (
-                    <>
-                      Showing{' '}
-                      <strong>
-                        {(currentPage - 1) * employeePagination.per_page + 1}
-                        {'–'}
-                        {(currentPage - 1) * employeePagination.per_page + employees.length}
-                      </strong>{' '}
-                      of <strong>{employeePagination.total.toLocaleString()}</strong>{' '}
-                      matching employees
-                    </>
-                  )}
-                </span>
-                <div className="pagination-controls" aria-label="Employee pagination">
-                  <button
-                    type="button"
-                    className="secondary-button pagination-button"
-                    disabled={isLoadingEmployees || currentPage <= 1}
-                    onClick={() => goToPage(currentPage - 1)}
-                  >
-                    ← Previous
-                  </button>
-                  <span className="pagination-page">
-                    Page <strong>{employeePagination.total_pages === 0 ? 0 : currentPage}</strong>{' '}
-                    of <strong>{employeePagination.total_pages}</strong>
-                  </span>
-                  <button
-                    type="button"
-                    className="secondary-button pagination-button"
-                    disabled={
-                      isLoadingEmployees ||
-                      employeePagination.total_pages === 0 ||
-                      currentPage >= employeePagination.total_pages
-                    }
-                    onClick={() => goToPage(currentPage + 1)}
-                  >
-                    Next →
-                  </button>
+                      {!isLoadingEmployees &&
+                        !employeeError &&
+                        filteredEmployees.map((employee, index) => {
+                          const name = `${employee.first_name} ${employee.last_name}`
+                          const isActive =
+                            employee.employment_status.toLowerCase() === 'active'
+
+                          return (
+                            <tr key={employee.id}>
+                              <td>
+                                <div className="employee-cell">
+                                  <div
+                                    className={`avatar employee-avatar avatar-${index % 4}`}
+                                  >
+                                    {employee.first_name[0]}
+                                    {employee.last_name[0]}
+                                  </div>
+                                  <div className="employee-info">
+                                    <button
+                                      type="button"
+                                      className="employee-name-button"
+                                      onClick={() => void handleOpenEmployeeDetails(employee.id)}
+                                      aria-label={`View details for ${name}`}
+                                    >
+                                      {name}
+                                    </button>
+                                    <span>
+                                      {employee.employee_number} · {employee.email}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>{employee.department}</td>
+                              <td>{employee.country.name}</td>
+                              <td>
+                                <span
+                                  className={`status-pill ${isActive ? 'status-active' : 'status-leave'}`}
+                                >
+                                  <span className="status-dot"></span>
+                                  {formatStatus(employee.employment_status)}
+                                </span>
+                              </td>
+                              <td className="salary-cell">
+                                {employee.current_salary
+                                  ? `${employee.current_salary.currency} ${Number(
+                                    employee.current_salary.amount,
+                                  ).toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}`
+                                  : '—'}
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="row-menu"
+                                  aria-label={`More options for ${name}`}
+                                  title="Employee actions are not available yet"
+                                  onClick={() =>
+                                    window.alert(
+                                      'Employee actions will be added in a later step.',
+                                    )
+                                  }
+                                >
+                                  ···
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+
+                      {!isLoadingEmployees &&
+                        !employeeError &&
+                        filteredEmployees.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="empty-state">
+                              {employees.length === 0
+                                ? 'No employees were returned by the API.'
+                                : 'No employees match your search or filters.'}
+                            </td>
+                          </tr>
+                        )}
+                    </tbody>
+                  </table>
                 </div>
-              </footer>
-            </>
+
+                <footer className="table-footer">
+                  <span>
+                    {employeePagination.total === 0 ? (
+                      'Showing 0 of 0 matching employees'
+                    ) : (
+                      <>
+                        Showing{' '}
+                        <strong>
+                          {(currentPage - 1) * employeePagination.per_page + 1}
+                          {'–'}
+                          {(currentPage - 1) * employeePagination.per_page + employees.length}
+                        </strong>{' '}
+                        of <strong>{employeePagination.total.toLocaleString()}</strong>{' '}
+                        matching employees
+                      </>
+                    )}
+                  </span>
+                  <div className="pagination-controls" aria-label="Employee pagination">
+                    <button
+                      type="button"
+                      className="secondary-button pagination-button"
+                      disabled={isLoadingEmployees || currentPage <= 1}
+                      onClick={() => goToPage(currentPage - 1)}
+                    >
+                      ← Previous
+                    </button>
+                    <span className="pagination-page">
+                      Page <strong>{employeePagination.total_pages === 0 ? 0 : currentPage}</strong>{' '}
+                      of <strong>{employeePagination.total_pages}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      className="secondary-button pagination-button"
+                      disabled={
+                        isLoadingEmployees ||
+                        employeePagination.total_pages === 0 ||
+                        currentPage >= employeePagination.total_pages
+                      }
+                      onClick={() => goToPage(currentPage + 1)}
+                    >
+                      Next →
+                    </button>
+                  </div>
+                </footer>
+              </>
+            )
           ) : activePage === 'Salary records' ? (
             <>
               <section className="page-heading">
@@ -972,6 +1203,7 @@ function App() {
                   onClick={() => {
                     setSalaryFormError('')
                     setSalaryFormSuccess('')
+                    setEditingSalaryRecord(null)
                     setShowSalaryForm((show) => !show)
                   }}
                 >
@@ -988,36 +1220,52 @@ function App() {
                   className="salary-form"
                   onSubmit={handleCreateSalaryRecord}
                 >
-                  <h2>New salary record</h2>
+                  <h2>{editingSalaryRecord ? 'Create salary change' : 'New salary record'}</h2>
 
-                  <label htmlFor="salary-employee-search">Search employee</label>
-                  <input
-                    id="salary-employee-search"
-                    type="search"
-                    placeholder="Name or employee number"
-                    value={salaryEmployeeSearch}
-                    onChange={(event) => {
-                      setSalaryEmployeeSearch(event.target.value)
-                      setSalaryEmployeeId('')
-                    }}
-                  />
+                  {editingSalaryRecord ? (
+                    <>
+                      <label htmlFor="salary-employee-display">Employee</label>
+                      <input
+                        id="salary-employee-display"
+                        type="text"
+                        value={`${editingSalaryRecord.employee.first_name} ${editingSalaryRecord.employee.last_name} — ${editingSalaryRecord.employee.employee_number}`}
+                        readOnly
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <label htmlFor="salary-employee-search">Search employee</label>
+                      <input
+                        id="salary-employee-search"
+                        type="search"
+                        placeholder="Name or employee number"
+                        value={salaryEmployeeSearch}
+                        onChange={(event) => {
+                          setSalaryEmployeeSearch(event.target.value)
+                          setSalaryEmployeeId('')
+                        }}
+                      />
 
-                  <label htmlFor="salary-employee-id">Select employee</label>
-                  <select
-                    id="salary-employee-id"
-                    required
-                    value={salaryEmployeeId}
-                    onChange={(event) => setSalaryEmployeeId(event.target.value)}
-                  >
-                    <option value="">
-                      {isLoadingSalaryEmployees ? 'Loading employees...' : 'Choose an employee'}
-                    </option>
-                    {salaryEmployeeOptions.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.first_name} {employee.last_name} — {employee.employee_number}
-                      </option>
-                    ))}
-                  </select>
+                      <label htmlFor="salary-employee-id">Select employee</label>
+                      <select
+                        id="salary-employee-id"
+                        required
+                        value={salaryEmployeeId}
+                        onChange={(event) => setSalaryEmployeeId(event.target.value)}
+                      >
+                        <option value="">
+                          {isLoadingSalaryEmployees ? 'Loading employees...' : 'Choose an employee'}
+                        </option>
+
+                        {salaryEmployeeOptions.map((employee) => (
+                          <option key={employee.id} value={employee.id}>
+                            {employee.first_name} {employee.last_name} — {employee.employee_number}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+
 
                   <label htmlFor="salary-amount">Annual salary amount</label>
                   <input
@@ -1049,6 +1297,7 @@ function App() {
                   <input
                     id="salary-effective-from"
                     type="date"
+                    min={new Date().toLocaleDateString('en-CA')}
                     required
                     value={salaryEffectiveFrom}
                     onChange={(event) => setSalaryEffectiveFrom(event.target.value)}
@@ -1069,7 +1318,11 @@ function App() {
                   )}
 
                   <button type="submit" disabled={isSavingSalary}>
-                    {isSavingSalary ? 'Saving…' : 'Create salary record'}
+                    {isSavingSalary
+                      ? 'Saving…'
+                      : editingSalaryRecord
+                        ? 'Create salary change'
+                        : 'Create salary record'}
                   </button>
                 </form>
               )}
@@ -1118,13 +1371,14 @@ function App() {
                       <th>ANNUAL SALARY</th>
                       <th>EFFECTIVE FROM</th>
                       <th>REASON</th>
+                      <th>ACTIONS</th>
                     </tr>
                   </thead>
 
                   <tbody>
                     {isLoadingSalaryRecords && (
                       <tr>
-                        <td colSpan={6} className="empty-state">
+                        <td colSpan={7} className="empty-state">
                           Loading salary records…
                         </td>
                       </tr>
@@ -1153,6 +1407,17 @@ function App() {
                           </td>
                           <td>{record.effective_from}</td>
                           <td>{record.reason}</td>
+                          <td>
+                            {record.is_latest_scheduled && (
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => handleEditSalaryRecord(record)}
+                              >
+                                Create salary change
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       ))}
 
@@ -1160,7 +1425,7 @@ function App() {
                       !salaryRecordsError &&
                       salaryRecords.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="empty-state">
+                          <td colSpan={7} className="empty-state">
                             No salary records match your search.
                           </td>
                         </tr>

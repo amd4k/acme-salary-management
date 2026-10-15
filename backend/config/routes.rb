@@ -10,7 +10,7 @@ Rails.application.routes.draw do
       resources :salary_records, only: [:index]
 
       resources :employees, only: [:index, :show] do
-        resources :salary_records, only: [:create, :update]
+        resources :salary_records, only: [:create]
       end
     end
   end

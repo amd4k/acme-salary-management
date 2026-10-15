@@ -47,6 +47,12 @@ export interface Employee {
         name: string
         code: string
     }
+    current_salary: {
+        id: number
+        amount: string | number
+        currency: string
+        effective_from: string
+    } | null
 }
 
 export interface EmployeesResponse {
@@ -100,6 +106,44 @@ export async function fetchEmployees(
     return data as EmployeesResponse
 }
 
+
+export interface EmployeeSalaryHistoryRecord {
+    id: number
+    amount: string | number
+    currency: string
+    effective_from: string
+    reason: string
+    created_by_id: number
+}
+
+export interface EmployeeDetailsResponse {
+    employee: Omit<Employee, 'current_salary'>
+    current_salary: EmployeeSalaryHistoryRecord | null
+    salary_history: EmployeeSalaryHistoryRecord[]
+}
+
+export async function fetchEmployeeDetails(
+    token: string,
+    employeeId: number,
+): Promise<EmployeeDetailsResponse> {
+    const response = await fetch(
+        `${API_BASE_URL}/api/v1/employees/${employeeId}`,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        },
+    )
+
+    const data = await response.json()
+
+    if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch employee details')
+    }
+
+    return data as EmployeeDetailsResponse
+}
+
 export interface DashboardStatistics {
     total_employees: number
     active_employees: number
@@ -141,6 +185,7 @@ export interface SalaryRecord {
     reason: string
     created_by_id: number
     updated_by_id: number | null
+    is_latest_scheduled: boolean
     employee: {
         id: number
         employee_number: string
@@ -207,6 +252,7 @@ export interface CreateSalaryRecordInput {
     currency: string
     effective_from: string
     reason: string
+    based_on_salary_record_id?: number
 }
 
 export async function createSalaryRecord(
@@ -222,6 +268,7 @@ export async function createSalaryRecord(
                 Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify({
+                based_on_salary_record_id: input.based_on_salary_record_id,
                 salary_record: {
                     amount: input.amount,
                     currency: input.currency,
